@@ -2089,9 +2089,19 @@ static void goodix_panel_notifier_callback(enum panel_event_notifier_tag tag,
 		}
 		break;
 	case DRM_PANEL_EVENT_FPS_CHANGE:
-		ts_debug("Received fps change old fps:%d new fps:%d\n",
-				notification->notif_data.old_fps,
-				notification->notif_data.new_fps);
+		if (notification->notif_data.early_trigger) {
+			/* Disable IRQ during panel transition to prevent EMI ghost touches */
+			if (core_data->hw_ops->irq_enable)
+				core_data->hw_ops->irq_enable(core_data, false);
+		} else {
+			/* Force IC to re-sync with the new panel TE/VSYNC phase */
+			if (core_data->hw_ops->set_coor_mode)
+				core_data->hw_ops->set_coor_mode(core_data);
+
+			/* Re-enable IRQ after phase alignment */
+			if (core_data->hw_ops->irq_enable)
+				core_data->hw_ops->irq_enable(core_data, true);
+		}
 		break;
 
 	default:
