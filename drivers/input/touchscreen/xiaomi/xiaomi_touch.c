@@ -534,16 +534,6 @@ touch_panel_event_callback(enum panel_event_notifier_tag tag,
 			}
 		}
 		break;
-	case DRM_PANEL_EVENT_FPS_CHANGE:
-		/*
-		 * Synchronize the touch controller report rate when the display
-		 * refresh rate dynamically changes (DFPS).
-		 * This prevents hardware desynchronization and ghost touches
-		 * caused by mismatched panel and touch polling frequencies.
-		 */
-		pr_debug("xiaomi_touch: Panel FPS changed, syncing touch report rate\n");
-		touch_mode_set(TOUCH_MODE_REPORT_RATE, 1);
-		break;
 	default:
 		break;
 	}
