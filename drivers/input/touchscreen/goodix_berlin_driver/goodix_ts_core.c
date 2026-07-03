@@ -2090,15 +2090,15 @@ static void goodix_panel_notifier_callback(enum panel_event_notifier_tag tag,
 		break;
 	case DRM_PANEL_EVENT_FPS_CHANGE:
 		if (notification->notif_data.early_trigger) {
-			/* Disable IRQ during panel transition to prevent EMI ghost touches */
+			/* Disable IRQs during panel transition to mask EMI noise */
 			if (core_data->hw_ops->irq_enable)
 				core_data->hw_ops->irq_enable(core_data, false);
 		} else {
-			/* Force IC to re-sync with the new panel TE/VSYNC phase */
-			if (core_data->hw_ops->set_coor_mode)
-				core_data->hw_ops->set_coor_mode(core_data);
+			/* Acknowledge any pending touch event caught during the transition */
+			if (core_data->hw_ops->after_event_handler)
+				core_data->hw_ops->after_event_handler(core_data);
 
-			/* Re-enable IRQ after phase alignment */
+			/* Safely re-enable IRQs */
 			if (core_data->hw_ops->irq_enable)
 				core_data->hw_ops->irq_enable(core_data, true);
 		}
