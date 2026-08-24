@@ -17,6 +17,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/spi/spi.h>
+#include <linux/delay.h>
 
 #include "goodix_ts_core.h"
 #define TS_DRIVER_NAME		"gtx8_spi"
@@ -79,7 +80,17 @@ static int goodix_spi_read_bra(struct device *dev, unsigned int addr,
 	xfers.len = SPI_READ_PREFIX_LEN + len;
 	xfers.cs_change = 0;
 	spi_message_add_tail(&xfers, &spi_msg);
-	ret = spi_sync(spi, &spi_msg);
+	
+	/* Retry loop for SPI -13 (EACCES) error */
+	{
+		int retry = 10;
+		do {
+			ret = spi_sync(spi, &spi_msg);
+			if (ret != -13)
+				break;
+			usleep_range(2000, 3000);
+		} while (--retry > 0);
+	}
 	if (ret < 0) {
 		ts_err("spi transfer error:%d", ret);
 		goto exit;
@@ -128,7 +139,17 @@ static int goodix_spi_read(struct device *dev, unsigned int addr,
 	xfers.len = SPI_READ_PREFIX_LEN - 1 + len;
 	xfers.cs_change = 0;
 	spi_message_add_tail(&xfers, &spi_msg);
-	ret = spi_sync(spi, &spi_msg);
+	
+	/* Retry loop for SPI -13 (EACCES) error */
+	{
+		int retry = 10;
+		do {
+			ret = spi_sync(spi, &spi_msg);
+			if (ret != -13)
+				break;
+			usleep_range(2000, 3000);
+		} while (--retry > 0);
+	}
 	if (ret < 0) {
 		ts_err("spi transfer error:%d", ret);
 		goto exit;
@@ -175,7 +196,17 @@ static int goodix_spi_write(struct device *dev, unsigned int addr,
 	xfers.len = SPI_WRITE_PREFIX_LEN + len;
 	xfers.cs_change = 0;
 	spi_message_add_tail(&xfers, &spi_msg);
-	ret = spi_sync(spi, &spi_msg);
+	
+	/* Retry loop for SPI -13 (EACCES) error */
+	{
+		int retry = 10;
+		do {
+			ret = spi_sync(spi, &spi_msg);
+			if (ret != -13)
+				break;
+			usleep_range(2000, 3000);
+		} while (--retry > 0);
+	}
 	if (ret < 0)
 		ts_err("spi transfer error:%d", ret);
 
