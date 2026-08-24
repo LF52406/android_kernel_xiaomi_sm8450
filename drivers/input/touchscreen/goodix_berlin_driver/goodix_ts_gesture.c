@@ -249,7 +249,7 @@ static int gsx_gesture_ist(struct goodix_ts_core *cd,
 	ret = hw_ops->event_handler(cd, &gs_event);
 	if (ret) {
 		ts_err("failed get gesture data");
-		goto re_send_ges_cmd;
+		return EVT_CANCEL_IRQEVT;
 	}
 
 	if (!(gs_event.event_type & EVENT_GESTURE)) {
