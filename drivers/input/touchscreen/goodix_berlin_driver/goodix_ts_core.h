@@ -519,6 +519,9 @@ struct goodix_ts_core {
 
 	atomic_t irq_enabled;
 	atomic_t suspended;
+	struct mutex irq_state_lock;
+	bool power_transition;
+	bool fps_irq_disabled;
 	/* when this flag is true, driver should not clean the sync flag */
 	bool tools_ctrl_sync;
 
