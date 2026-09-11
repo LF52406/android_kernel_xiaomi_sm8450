@@ -1805,9 +1805,12 @@ static int goodix_ts_suspend(struct goodix_ts_core *core_data)
 		return 0;
 
 	ts_info("Suspend start");
+	mutex_lock(&core_data->irq_state_lock);
+	core_data->power_transition = true;
 	atomic_set(&core_data->suspended, 1);
 	/* disable irq */
 	hw_ops->irq_enable(core_data, false);
+	mutex_unlock(&core_data->irq_state_lock);
 
 	/*
 	 * notify suspend event, inform the esd protector
@@ -1859,6 +1862,10 @@ static int goodix_ts_suspend(struct goodix_ts_core *core_data)
 
 out:
 	goodix_ts_release_connects(core_data);
+	mutex_lock(&core_data->irq_state_lock);
+	core_data->power_transition = false;
+	core_data->fps_irq_disabled = false;
+	mutex_unlock(&core_data->irq_state_lock);
 	ts_info("Suspend end");
 	return 0;
 }
@@ -1885,8 +1892,11 @@ static int goodix_ts_resume(struct goodix_ts_core *core_data)
 		return 0;
 
 	ts_info("Resume start");
+	mutex_lock(&core_data->irq_state_lock);
+	core_data->power_transition = true;
 	atomic_set(&core_data->suspended, 0);
 	hw_ops->irq_enable(core_data, false);
+	mutex_unlock(&core_data->irq_state_lock);
 
 	cancel_delayed_work_sync(&core_data->gesture_work);
 
@@ -1930,8 +1940,6 @@ static int goodix_ts_resume(struct goodix_ts_core *core_data)
 	mutex_unlock(&goodix_modules.mutex);
 
 out:
-	/* enable irq */
-	hw_ops->irq_enable(core_data, true);
 	/* open esd */
 	goodix_ts_blocking_notify(NOTIFY_RESUME, NULL);
 	if (core_data->board_data.support_thp_fw) {
@@ -1940,6 +1948,18 @@ out:
 	if (core_data->high_report_rate) {
 		core_data->hw_ops->switch_report_rate(core_data, true);
 	}
+
+	/*
+	 * Resume owns the IRQ state until controller setup is complete.
+	 * Publish the active state and re-enable IRQ atomically with respect
+	 * to panel FPS notifications.
+	 */
+	mutex_lock(&core_data->irq_state_lock);
+	core_data->power_transition = false;
+	core_data->fps_irq_disabled = false;
+	hw_ops->irq_enable(core_data, true);
+	mutex_unlock(&core_data->irq_state_lock);
+
 	ts_info("Resume end");
 	return 0;
 }
@@ -2089,29 +2109,45 @@ static void goodix_panel_notifier_callback(enum panel_event_notifier_tag tag,
 		}
 		break;
 	case DRM_PANEL_EVENT_FPS_CHANGE:
+		mutex_lock(&core_data->irq_state_lock);
+
+		/*
+		 * Suspend/resume owns the IRQ state while a power transition is
+		 * in progress. Ignore FPS notifications until that transition is
+		 * complete so they cannot re-enable the IRQ prematurely.
+		 */
+		if (core_data->power_transition ||
+				atomic_read(&core_data->suspended)) {
+			ts_debug("Skip FPS IRQ handling during touch power transition");
+			mutex_unlock(&core_data->irq_state_lock);
+			break;
+		}
+
 		if (notification->notif_data.early_trigger) {
-			/* Disable IRQs during panel transition to mask EMI noise */
-			if (core_data->hw_ops->irq_enable)
-				core_data->hw_ops->irq_enable(core_data, false);
-		} else {
 			/*
-			 * A BLANK event may race with the late FPS notification.
-			 * In that case suspend owns the disabled IRQ state, so do not
-			 * acknowledge stale touch data or re-enable the IRQ here.
+			 * Only claim ownership when the IRQ was actually enabled.
+			 * This prevents the late notification from re-enabling an IRQ
+			 * disabled by another driver path.
 			 */
-			if (atomic_read(&core_data->suspended)) {
-				ts_debug("Skip FPS completion while touch is suspended");
-				break;
+			if (!core_data->fps_irq_disabled &&
+					atomic_read(&core_data->irq_enabled) &&
+					core_data->hw_ops->irq_enable) {
+				core_data->hw_ops->irq_enable(core_data, false);
+				core_data->fps_irq_disabled = true;
 			}
+		} else if (core_data->fps_irq_disabled) {
+			/* Consume only the IRQ disable owned by this FPS transition. */
+			core_data->fps_irq_disabled = false;
 
 			/* Acknowledge any pending touch event caught during the transition */
 			if (core_data->hw_ops->after_event_handler)
 				core_data->hw_ops->after_event_handler(core_data);
 
-			/* Safely re-enable IRQs */
 			if (core_data->hw_ops->irq_enable)
 				core_data->hw_ops->irq_enable(core_data, true);
 		}
+
+		mutex_unlock(&core_data->irq_state_lock);
 		break;
 
 	default:
@@ -2544,6 +2580,8 @@ static int goodix_ts_probe(struct platform_device *pdev)
 		core_module_prob_sate = CORE_MODULE_PROB_FAILED;
 		return -ENOMEM;
 	}
+
+	mutex_init(&core_data->irq_state_lock);
 
 	if (IS_ENABLED(CONFIG_OF) && bus_interface->dev->of_node) {
 		/* parse devicetree property */
