@@ -2094,6 +2094,16 @@ static void goodix_panel_notifier_callback(enum panel_event_notifier_tag tag,
 			if (core_data->hw_ops->irq_enable)
 				core_data->hw_ops->irq_enable(core_data, false);
 		} else {
+			/*
+			 * A BLANK event may race with the late FPS notification.
+			 * In that case suspend owns the disabled IRQ state, so do not
+			 * acknowledge stale touch data or re-enable the IRQ here.
+			 */
+			if (atomic_read(&core_data->suspended)) {
+				ts_debug("Skip FPS completion while touch is suspended");
+				break;
+			}
+
 			/* Acknowledge any pending touch event caught during the transition */
 			if (core_data->hw_ops->after_event_handler)
 				core_data->hw_ops->after_event_handler(core_data);
