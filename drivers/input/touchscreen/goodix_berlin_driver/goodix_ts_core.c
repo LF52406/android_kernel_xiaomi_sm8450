@@ -1270,31 +1270,16 @@ static void goodix_ts_release_touch_slots_locked(struct input_dev *dev)
 
 static void goodix_ts_release_connects(struct goodix_ts_core *core_data);
 
-/* An event read/checksum failure must not leave a Linux touch slot stuck.
- * Preserve one bad frame, then release all slots if corruption persists.
+/*
+ * A corrupt/unreadable frame does not prove that the finger was lifted.
+ * Preserve Linux MT slots until a valid controller frame reconciles them;
+ * explicit controller reset and suspend already release contacts safely.
+ * Never synthesize UP just because consecutive IRQ frames were rejected:
+ * a still-held finger would then appear as a second DOWN to Android.
  */
 static void goodix_ts_invalidate_frame(struct goodix_ts_core *cd)
 {
-	struct goodix_touch_guard *guard = &cd->touch_guard;
-	struct input_dev *dev = cd->input_dev;
-	u16 active;
-
-	atomic64_inc(&guard->invalid_frames);
-	if (!dev)
-		return;
-
-	mutex_lock(&dev->mutex);
-	if (guard->invalid_frame_streak < 2)
-		guard->invalid_frame_streak++;
-
-	if (guard->invalid_frame_streak >= 2 && guard->reported_mask) {
-		active = guard->reported_mask;
-		goodix_ts_release_touch_slots_locked(dev);
-		guard->reported_mask = 0;
-		atomic64_add(goodix_touch_mask_count(active),
-				&guard->forced_releases);
-	}
-	mutex_unlock(&dev->mutex);
+	atomic64_inc(&cd->touch_guard.invalid_frames);
 }
 
 static bool goodix_ts_validate_touch_frame(struct goodix_ts_core *cd,
@@ -1354,7 +1339,6 @@ static void goodix_ts_report_finger(struct input_dev *dev,
 	}
 
 	mutex_lock(&dev->mutex);
-	guard->invalid_frame_streak = 0;
 	newly_reported = raw_mask & ~guard->reported_mask;
 	guard->reported_mask = raw_mask;
 	if (newly_reported)
@@ -1936,7 +1920,6 @@ static void goodix_ts_release_connects(struct goodix_ts_core *core_data)
 	mutex_lock(&input_dev->mutex);
 	goodix_ts_release_touch_slots_locked(input_dev);
 	core_data->touch_guard.reported_mask = 0;
-	core_data->touch_guard.invalid_frame_streak = 0;
 	mutex_unlock(&input_dev->mutex);
 }
 

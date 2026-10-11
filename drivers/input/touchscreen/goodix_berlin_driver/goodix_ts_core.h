@@ -403,7 +403,6 @@ struct goodix_touch_data {
  */
 struct goodix_touch_guard {
 	u16 reported_mask;
-	u8 invalid_frame_streak;
 	atomic64_t invalid_frames;
 	atomic64_t forced_releases;
 	atomic64_t confirmed_contacts;
